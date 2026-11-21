@@ -84,6 +84,37 @@ samples.affine_equal(sign) 与 potential_equal(sign) 分别手工声明
 X=sign·Y、X 方差 1 的两种原生样例；sign 使用 1 或 -1。
 这些端口和旧应用是两套独立归档，没有升级入口、表示转换或兼容适配。
 
+## 站件摘要与联邦中心
+
+两套归档之外新增第三套独立端口，中心不读取任何原观测。
+
+site_summary.compile_site(case_id, site_id, variables, observations, values, noise) -> bytes
+在无中心先验、无输出定义的条件下独立编制定长站件。变量 1–6 个、观测至多 8 条，
+观测/值/噪声的校验与 Request 相同（至多 8 条具名线性行、半正定噪声，可为空摘录）。
+返回确定性 UTF-8 JSON 字节，顶层为 version=1、case_id、site_id、variables、body。
+body 以变量数 n 为尺度只保留：canonical 约束（≤ n 行，来自零噪声/奇异噪声的精确支持）、
+PSD 精度 n×n、信息向量 n 维；不含观测名、明细值或观测维度的数组，也不含边际似然常数。
+原始观测值 y 与观测阵 H 只经 HᵀR⁺H、HᵀR⁺y 及零空间约束进入正文。
+
+- 零噪声/奇异噪声经 R 的核空间落成硬约束；其余行以 P=HᵀR⁺H、q=HᵀR⁺y 保留站内相对权重。
+- 站内自身无解（如零噪声把同一量钉到两个值）时正常编制，body.feasible=false 且不带约束或权重；
+  格式非法（未知变量、非 PSD 噪声等）抛 ValueError。
+- 空观测站件是合法摘要（无约束、零精度），合并时中性。
+- 同一摘要可用于不同中心先验和不同输出；编制时与先验无关。
+
+federated.FederatedArchive(db) 使用独立表 fed_cases / fed_sites / fed_results，重开保留旧案件。
+open_case(case_id, prior, outputs, sites) 接受 gauss2.Affine 或 gauss2.Potential 作共同先验、
+沿用 Request 的非空有序输出字典、2–3 个不同站号，固定内容与顺序；同号同内容可重投，异内容抛 ValueError。
+add_site(case_id, packet) 校验字节后落库并返回首存原字节；案件、变量顺序、站号、版本错配、
+未知字段、重复 JSON 键、结构或数学非法均抛 ValueError 且不留首收；同站同字节返回首收，异字节拒绝。
+finish(case_id) 在全员到齐后以单个共同先验与各站摘要算联合条件分布，返回 specs.Result；
+缺站抛 ValueError 且仍可继续收件。站件无解、站间支持交集为空或与退化先验互斥时签发
+Result("inconsistent", labels)。签发后重复 finish 按原号领取固定结果，原站件重投返回原件；
+失败写入不留半成品，调用方事后修改输入对象不影响已存案件。
+
+site_demo.py 演示断源后仅凭站件字节汇合：(9/4,1/4)、协方差四项 1/4，以及乙站改为
+零噪声 X−Z=1 时的 inconsistent。
+
 ## 事务和范围
 
 database.atomic(db, before_commit=None) 是现成事务设施。
@@ -98,4 +129,7 @@ database.connect 启用外键与显式事务；db 由调用方独占。
 exact.py 提供一般有理消元、逆、行列式、核空间和 PSD 验证；
 没有协方差到 SDK2 表示的构造器。PSD 验证用全部主子式，
 条件分析每次完整重算，维度上界固定为 8。
-测试中的独立判定器通过最大可逆主块计算期望，不调用生产线性代数或 SDK 构造期望。
+站件编制另用 exact.canonical_constraints（RREF 归约）与 exact.psd_factor/pseudo_inverse
+（对角主元 PSD 分解与精确 Moore–Penrose 伪逆），仍只用有理数、无抖动。
+测试中的独立判定器通过最大可逆主块计算期望，不调用生产线性代数或 SDK 构造期望；
+联邦合并的对照判定器另把各站观测拼成块对角噪声的单一 Request，直接用旧 SDK 求期望。

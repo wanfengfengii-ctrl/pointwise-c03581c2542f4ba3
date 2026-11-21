@@ -110,6 +110,82 @@ def inverse(a):
     return transpose(columns, n)
 
 
+def canonical_constraints(a, b, n):
+    """Reduce an affine system to independent reduced-row-echelon equations.
+
+    Returns (rows, values) with rows spanning the same solution set, or None
+    when no point satisfies the system.  The result contains at most n rows.
+    """
+    if len(a) != len(b):
+        raise ValueError("system shape")
+    work = [list(row) + [rhs] for row, rhs in zip(matrix(a, len(a), n), vector(b, len(b)))]
+    pivots = []
+    lead = 0
+    for col in range(n):
+        pivot = next((r for r in range(lead, len(work)) if work[r][col]), None)
+        if pivot is None:
+            continue
+        work[lead], work[pivot] = work[pivot], work[lead]
+        scale = work[lead][col]
+        work[lead] = [v / scale for v in work[lead]]
+        for r in range(len(work)):
+            if r != lead and work[r][col]:
+                factor = work[r][col]
+                work[r] = [x - factor * y for x, y in zip(work[r], work[lead])]
+        pivots.append(col)
+        lead += 1
+    for r in range(lead, len(work)):
+        if work[r][n]:
+            return None
+    return [work[r][:n] for r in range(lead)], [work[r][n] for r in range(lead)]
+
+
+def psd_factor(a):
+    """Factor a symmetric PSD matrix as sum(weights[j] outer(v_j, v_j)).
+
+    Exact diagonal-pivoted elimination; raises ValueError when the input is not
+    symmetric positive semidefinite.
+    """
+    n = len(a)
+    s = [list(row) for row in matrix(a, n, n)]
+    symmetric(s)
+    columns, weights = [], []
+    for _ in range(n):
+        pivot = next((i for i in range(n) if s[i][i]), None)
+        if pivot is None:
+            break
+        d = s[pivot][pivot]
+        if d < 0:
+            raise ValueError("not positive semidefinite")
+        v = [s[i][pivot] for i in range(n)]
+        for i in range(n):
+            if v[i]:
+                factor = v[i] / d
+                s[i] = [x - factor * y for x, y in zip(s[i], v)]
+        columns.append(v)
+        weights.append(Fraction(1) / d)
+    if any(any(x for x in row) for row in s):
+        raise ValueError("not positive semidefinite")
+    return columns, weights
+
+
+def pseudo_inverse(a):
+    """Exact Moore-Penrose inverse of a symmetric positive semidefinite matrix."""
+    n = len(a)
+    a = matrix(a, n, n)
+    columns, weights = psd_factor(a)
+    r = len(columns)
+    if r == 0:
+        return zeros(n, n)
+    basis = [[columns[j][i] for j in range(r)] for i in range(n)]
+    bt = transpose(basis, r)
+    gram_inverse = inverse(multiply(bt, basis, r))
+    work = multiply(basis, gram_inverse, r)
+    work = [[work[i][j] / weights[j] for j in range(r)] for i in range(n)]
+    work = multiply(work, gram_inverse, r)
+    return multiply(work, bt, n)
+
+
 def determinant(a):
     n = len(a)
     a = matrix(a, n, n)
